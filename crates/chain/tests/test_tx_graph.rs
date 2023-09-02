@@ -644,57 +644,46 @@ fn test_walk_ancestors() {
         tx_e0.clone(),
     ]);
 
-    let mut ancestors = vec![
+    let ancestors = [
         graph
-            .walk_ancestors(tx_e0.clone(), 25)
-            .collect::<Vec<_>>()
-            .iter()
-            .map(|(depth, tx)| (*depth, tx.txid()))
-            .collect::<Vec<_>>(),
+            .walk_ancestors(&tx_e0, 25)
+            .map(|(depth, tx)| (depth, tx.txid()))
+            .collect::<BTreeSet<_>>(),
         graph
-            .walk_ancestors(tx_e0, 3)
-            .collect::<Vec<_>>()
-            .iter()
-            .map(|(depth, tx)| (*depth, tx.txid()))
-            .collect::<Vec<_>>(),
+            .walk_ancestors(&tx_e0, 3)
+            .map(|(depth, tx)| (depth, tx.txid()))
+            .collect::<BTreeSet<_>>(),
         graph
-            .walk_ancestors(tx_d0, 5)
-            .collect::<Vec<_>>()
-            .iter()
-            .map(|(depth, tx)| (*depth, tx.txid()))
-            .collect::<Vec<_>>(),
+            .walk_ancestors(&tx_d0, 5)
+            .map(|(depth, tx)| (depth, tx.txid()))
+            .collect::<BTreeSet<_>>(),
         graph
-            .walk_ancestors(tx_c0, 1)
-            .collect::<Vec<_>>()
-            .iter()
-            .map(|(depth, tx)| (*depth, tx.txid()))
-            .collect::<Vec<_>>(),
+            .walk_ancestors(&tx_c0, 1)
+            .map(|(depth, tx)| (depth, tx.txid()))
+            .collect::<BTreeSet<_>>(),
     ];
 
-    let mut expected_ancestors: Vec<Vec<(usize, Txid)>> = vec![
-        vec![
+    let expected_ancestors = [
+        BTreeSet::from([
             (4, tx_a0.txid()),
             (3, tx_b1.txid()),
             (3, tx_b2.txid()),
             (2, tx_c2.txid()),
             (2, tx_c3.txid()),
             (1, tx_d1.txid()),
-        ],
-        vec![
+        ]),
+        BTreeSet::from([
             (3, tx_b1.txid()),
             (3, tx_b2.txid()),
             (2, tx_c2.txid()),
             (2, tx_c3.txid()),
             (1, tx_d1.txid()),
-        ],
-        vec![(3, tx_a0.txid()), (2, tx_b0.txid()), (1, tx_c1.txid())],
-        vec![(1, tx_b0.txid())],
+        ]),
+        BTreeSet::from([(3, tx_a0.txid()), (2, tx_b0.txid()), (1, tx_c1.txid())]),
+        BTreeSet::from([(1, tx_b0.txid())]),
     ];
 
-    while let Some(mut txids) = ancestors.pop() {
-        let mut expected_txids = expected_ancestors.pop().unwrap();
-        txids.sort();
-        expected_txids.sort();
+    for (txids, expected_txids) in ancestors.iter().zip(expected_ancestors.iter()) {
         assert_eq!(txids, expected_txids);
     }
 }

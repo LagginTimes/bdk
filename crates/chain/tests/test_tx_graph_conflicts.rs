@@ -21,7 +21,7 @@ struct Scenario<'a> {
     /// Name of the test scenario
     name: &'a str,
     /// Transaction templates
-    tx_templates: &'a [TxTemplate<'a, ConfirmationHeightAnchor>],
+    tx_templates: &'a [TxTemplate<'a, BlockId>],
     /// Names of txs that must exist in the output of `list_chain_txs`
     exp_chain_txs: HashSet<(&'a str, u32)>,
     /// Outpoints of UTXOs that must exist in the output of `filter_chain_unspents`
@@ -42,205 +42,41 @@ fn test_tx_conflict_handling() {
         (1, h!("B")),
         (2, h!("C")),
         (3, h!("D")),
-        (4, h!("E"))
+        (4, h!("E")),
+        (5, h!("F")),
+        (6, h!("G"))
     );
     let chain_tip = local_chain
         .tip()
         .map(|cp| cp.block_id())
         .unwrap_or_default();
 
-    // Create test transactions
-
-    // Confirmed parent transaction at Block 1.
-    let tx1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx1",
-        inputs: &[TxInTemplate::Bogus],
-        outputs: &[TxOutTemplate {
-            value: 10000,
-            spk_index: Some(0),
-        }],
-        anchors: &[ConfirmationHeightAnchor {
-            anchor_block: BlockId {
-                height: 1,
-                hash: h!("B"),
-            },
-            confirmation_height: 1,
-        }],
-        last_seen: None,
-    };
-
-    let tx_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_conflict_1",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
-        outputs: &[TxOutTemplate {
-            value: 20000,
-            spk_index: Some(1),
-        }],
-        last_seen: Some(200),
-        ..Default::default()
-    };
-
-    let tx_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_conflict_2",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 30000,
-            spk_index: Some(2),
-        }],
-        last_seen: Some(300),
-        ..Default::default()
-    };
-
-    let tx_conflict_3: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_conflict_3",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 40000,
-            spk_index: Some(3),
-        }],
-        last_seen: Some(400),
-        ..Default::default()
-    };
-
-    let tx_orphaned_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_orphaned_conflict_1",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 30000,
-            spk_index: Some(2),
-        }],
-        anchors: &[ConfirmationHeightAnchor {
-            anchor_block: BlockId {
-                height: 5,
-                hash: h!("Orphaned Block"),
-            },
-            confirmation_height: 5,
-        }],
-        last_seen: Some(300),
-    };
-
-    let tx_orphaned_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_orphaned_conflict_2",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 30000,
-            spk_index: Some(2),
-        }],
-        anchors: &[ConfirmationHeightAnchor {
-            anchor_block: BlockId {
-                height: 5,
-                hash: h!("Orphaned Block"),
-            },
-            confirmation_height: 5,
-        }],
-        last_seen: Some(100),
-    };
-
-    let tx_confirmed_conflict: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_confirmed_conflict",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 50000,
-            spk_index: Some(4),
-        }],
-        anchors: &[ConfirmationHeightAnchor {
-            anchor_block: BlockId {
-                height: 1,
-                hash: h!("B"),
-            },
-            confirmation_height: 1,
-        }],
-        ..Default::default()
-    };
-
-    let tx_bestchain_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_bestchain_conflict_1",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 20000,
-            spk_index: Some(1),
-        }],
-        ..Default::default()
-    };
-
-    // Conflicting transaction anchored in best chain
-    let tx_bestchain_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_bestchain_conflict_2",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 20000,
-            spk_index: Some(2),
-        }],
-        anchors: &[ConfirmationHeightAnchor {
-            anchor_block: BlockId {
-                height: 4,
-                hash: h!("E"),
-            },
-            confirmation_height: 4,
-        }],
-        ..Default::default()
-    };
-
-    let tx_bestchain_spend_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_bestchain_spend_1",
-        inputs: &[TxInTemplate::PrevTx("tx_bestchain_conflict_1", 0)],
-        outputs: &[TxOutTemplate {
-            value: 30000,
-            spk_index: Some(3),
-        }],
-        ..Default::default()
-    };
-
-    let tx_bestchain_spend_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_bestchain_spend_2",
-        inputs: &[TxInTemplate::PrevTx("tx_bestchain_conflict_2", 0)],
-        outputs: &[TxOutTemplate {
-            value: 30000,
-            spk_index: Some(3),
-        }],
-        ..Default::default()
-    };
-
-    let tx_inputs_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_inputs_conflict_1",
-        inputs: &[
-            TxInTemplate::PrevTx("tx_conflict_1", 0),
-            TxInTemplate::PrevTx("tx_conflict_2", 0),
-        ],
-        outputs: &[TxOutTemplate {
-            value: 20000,
-            spk_index: Some(3),
-        }],
-        ..Default::default()
-    };
-
-    let tx_inputs_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_inputs_conflict_2",
-        inputs: &[
-            TxInTemplate::PrevTx("tx_conflict_1", 0),
-            TxInTemplate::PrevTx("tx_confirmed_conflict", 0),
-        ],
-        outputs: &[TxOutTemplate {
-            value: 20000,
-            spk_index: Some(5),
-        }],
-        ..Default::default()
-    };
-
-    let tx_spend_inputs_conflict: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-        tx_name: "tx_spend_inputs_conflict",
-        inputs: &[TxInTemplate::PrevTx("tx_inputs_conflict_2", 0)],
-        outputs: &[TxOutTemplate {
-            value: 20000,
-            spk_index: Some(6),
-        }],
-        ..Default::default()
-    };
-
     let scenarios = [
         Scenario {
             name: "2 unconfirmed txs with different last_seens conflict",
-            tx_templates: &[tx1, tx_conflict_1, tx_conflict_2],
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "tx1",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_1",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_2",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    last_seen: Some(300),
+                    ..Default::default()
+                },
+            ],
             exp_chain_txs: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
             exp_balance: Balance {
@@ -252,7 +88,36 @@ fn test_tx_conflict_handling() {
         },
         Scenario {
             name: "3 unconfirmed txs with different last_seens conflict",
-            tx_templates: &[tx1, tx_conflict_1, tx_conflict_2, tx_conflict_3],
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "tx1",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_1",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_2",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    last_seen: Some(300),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_3",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(40000, Some(3))],
+                    last_seen: Some(400),
+                    ..Default::default()
+                },
+            ],
             exp_chain_txs: HashSet::from([("tx1", 0), ("tx_conflict_3", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_3", 0)]),
             exp_balance: Balance {
@@ -263,10 +128,32 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
-            name: "unconfirmed tx conflicts with tx in orphaned block, orphaned higher unseen",
-            tx_templates: &[tx1, tx_conflict_1, tx_orphaned_conflict_1],
-            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_orphaned_conflict_1", 0)]),
-            exp_unspents: HashSet::from([("tx_orphaned_conflict_1", 0)]),
+            name: "unconfirmed tx conflicts with tx in orphaned block, orphaned higher last_seen",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "tx1",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_1",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_orphaned_conflict",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    anchors: &[block_id!(4, "Orphaned Block")],
+                    last_seen: Some(300),
+                },
+            ],
+            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_orphaned_conflict", 0)]),
+            exp_unspents: HashSet::from([("tx_orphaned_conflict", 0)]),
             exp_balance: Balance {
                 immature: 0,
                 trusted_pending: 30000,
@@ -275,8 +162,30 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
-            name: "unconfirmed tx conflicts with tx in orphaned block, orphaned lower unseen",
-            tx_templates: &[tx1, tx_conflict_1, tx_orphaned_conflict_2],
+            name: "unconfirmed tx conflicts with tx in orphaned block, orphaned lower last_seen",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "tx1",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_1",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_orphaned_conflict",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    anchors: &[block_id!(4, "Orphaned Block")],
+                    last_seen: Some(100),
+                },
+            ],
             exp_chain_txs: HashSet::from([("tx1", 0), ("tx_conflict_1", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_1", 0)]),
             exp_balance: Balance {
@@ -289,11 +198,41 @@ fn test_tx_conflict_handling() {
         Scenario {
             name: "multiple unconfirmed txs conflict with a confirmed tx",
             tx_templates: &[
-                tx1,
-                tx_conflict_1,
-                tx_conflict_2,
-                tx_conflict_3,
-                tx_confirmed_conflict,
+                TxTemplate {
+                    tx_name: "tx1",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_1",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_2",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    last_seen: Some(300),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_conflict_3",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(40000, Some(3))],
+                    last_seen: Some(400),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx_confirmed_conflict",
+                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+                    outputs: &[TxOutTemplate::new(50000, Some(4))],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                },
             ],
             exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
             exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
@@ -305,16 +244,38 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
-            name: "B and B' conflict, C spends B, B' is anchored in best chain",
+            name: "B and B' spend A and conflict, C spends B, A and B' are in best chain",
             tx_templates: &[
-                tx1,
-                tx_bestchain_conflict_1, // B
-                tx_bestchain_conflict_2, // B'
-                tx_bestchain_spend_1,    // C
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B'",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    anchors: &[block_id!(4, "E")],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "C",
+                    inputs: &[TxInTemplate::PrevTx("B", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    ..Default::default()
+                },
             ],
             // B and C should not appear in the list methods
-            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_bestchain_conflict_2", 0)]),
-            exp_unspents: HashSet::from([("tx_bestchain_conflict_2", 0)]),
+            exp_chain_txs: HashSet::from([("A", 0), ("B'", 0)]),
+            exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
                 immature: 0,
                 trusted_pending: 0,
@@ -323,20 +284,42 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
-            name: "B and B' conflict, C spends B', B' is anchored in best chain",
+            name: "B and B' spend A and conflict, C spends B', A and B' are in best chain",
             tx_templates: &[
-                tx1,
-                tx_bestchain_conflict_1, // B
-                tx_bestchain_conflict_2, // B'
-                tx_bestchain_spend_2,    // C
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B'",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    anchors: &[block_id!(4, "E")],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "C",
+                    inputs: &[TxInTemplate::PrevTx("B'", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    ..Default::default()
+                },
             ],
             // B should not appear in the list methods
             exp_chain_txs: HashSet::from([
-                ("tx1", 0),
-                ("tx_bestchain_conflict_2", 0),
-                ("tx_bestchain_spend_2", 0),
+                ("A", 0),
+                ("B'", 0),
+                ("C", 0),
             ]),
-            exp_unspents: HashSet::from([("tx_bestchain_spend_2", 0)]),
+            exp_unspents: HashSet::from([("C", 0)]),
             exp_balance: Balance {
                 immature: 0,
                 trusted_pending: 30000,
@@ -345,16 +328,42 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
-            name: "B and B' conflict, C spends both B and B'",
+            name: "B and B' spend A and conflict, C spends both B and B', A is in best chain",
             tx_templates: &[
-                tx1,
-                tx_conflict_1,        // B
-                tx_conflict_2,        // B'
-                tx_inputs_conflict_1, // C
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B'",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    last_seen: Some(300),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "C",
+                    inputs: &[
+                        TxInTemplate::PrevTx("B", 0),
+                        TxInTemplate::PrevTx("B'", 0),
+                    ],
+                    outputs: &[TxOutTemplate::new(20000, Some(3))],
+                    ..Default::default()
+                },
             ],
             // C should not appear in the list methods
-            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
-            exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
+            exp_chain_txs: HashSet::from([("A", 0), ("B'", 0)]),
+            exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
                 immature: 0,
                 trusted_pending: 30000,
@@ -363,16 +372,42 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
-            name: "B and B' conflict, B' is confirmed, C spends both B and B'",
+            name: "B and B' spend A and conflict, B' is confirmed, C spends both B and B', A is in best chain",
             tx_templates: &[
-                tx1,
-                tx_conflict_1,         // B
-                tx_confirmed_conflict, // B'
-                tx_inputs_conflict_2,  // C
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B'",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(50000, Some(4))],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "C",
+                    inputs: &[
+                        TxInTemplate::PrevTx("B", 0),
+                        TxInTemplate::PrevTx("B'", 0),
+                    ],
+                    outputs: &[TxOutTemplate::new(20000, Some(5))],
+                    ..Default::default()
+                },
             ],
             // C should not appear in the list methods
-            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
-            exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
+            exp_chain_txs: HashSet::from([("A", 0), ("B'", 0)]),
+            exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
                 immature: 0,
                 trusted_pending: 0,
@@ -383,15 +418,46 @@ fn test_tx_conflict_handling() {
         Scenario {
             name: "B and B' conflict, B' is confirmed, C spends both B and B', D spends C",
             tx_templates: &[
-                tx1,
-                tx_conflict_1,            // B
-                tx_confirmed_conflict,    // B'
-                tx_inputs_conflict_2,     // C
-                tx_spend_inputs_conflict, // D
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(200),
+                    ..Default::default()
+                }, // B
+                TxTemplate {
+                    tx_name: "B'",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(50000, Some(4))],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                }, // B'
+                TxTemplate {
+                    tx_name: "C",
+                    inputs: &[
+                        TxInTemplate::PrevTx("B", 0),
+                        TxInTemplate::PrevTx("B'", 0),
+                    ],
+                    outputs: &[TxOutTemplate::new(20000, Some(5))],
+                    ..Default::default()
+                }, // C
+                TxTemplate {
+                    tx_name: "D",
+                    inputs: &[TxInTemplate::PrevTx("C", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(6))],
+                    ..Default::default()
+                }, // D
             ],
             // D should not appear in the list methods
-            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
-            exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
+            exp_chain_txs: HashSet::from([("A", 0), ("B'", 0)]),
+            exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
                 immature: 0,
                 trusted_pending: 0,
