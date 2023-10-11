@@ -1,5 +1,5 @@
 [package]
-name = "bdk_bitcoind_rpc"
+name = "testenv"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,9 +10,7 @@ edition = "2021"
 bitcoin = { version = "0.30", default-features = false }
 bitcoincore-rpc = { version = "0.17" }
 bdk_chain = { path = "../chain", version = "0.5", default-features = false }
-
-[dev-dependencies]
-testenv = { path = "../testenv", version = "0.1.0", default_features = false }
+bdk_bitcoind_rpc = { path = "../bitcoind_rpc", version = "0.1.0", default-features = false }
 bitcoind = { version = "0.33", features = ["25_0"] }
 anyhow = { version = "1" }
 
