@@ -84,7 +84,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// - `fetch_prev_txouts`: specifies whether or not we want previous `TxOut`s for fee
     pub fn full_scan<K: Ord + Clone>(
         &self,
-        request: FullScanRequest<K>,
+        request: FullScanRequest<K, BlockId>,
         stop_gap: usize,
         batch_size: usize,
         fetch_prev_txouts: bool,
@@ -106,7 +106,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .iter()
                 .take(10)
                 .map(|cp| (cp.height(), cp))
-                .collect::<BTreeMap<u32, CheckPoint>>();
+                .collect::<BTreeMap<u32, CheckPoint<BlockId>>>();
 
             if !request_spks.is_empty() {
                 if !scanned_spks.is_empty() {
@@ -187,7 +187,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// [`full_scan`]: Self::full_scan
     pub fn sync(
         &self,
-        request: SyncRequest,
+        request: SyncRequest<BlockId>,
         batch_size: usize,
         fetch_prev_txouts: bool,
     ) -> Result<ElectrumSyncResult, Error> {
@@ -202,7 +202,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             .iter()
             .take(10)
             .map(|cp| (cp.height(), cp))
-            .collect::<BTreeMap<u32, CheckPoint>>();
+            .collect::<BTreeMap<u32, CheckPoint<BlockId>>>();
 
         self.populate_with_txids(&cps, &mut full_scan_res.graph_update, request.txids)?;
         self.populate_with_outpoints(&cps, &mut full_scan_res.graph_update, request.outpoints)?;
@@ -227,7 +227,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
     fn populate_with_spks<I: Ord + Clone>(
         &self,
-        cps: &BTreeMap<u32, CheckPoint>,
+        cps: &BTreeMap<u32, CheckPoint<BlockId>>,
         graph_update: &mut TxGraph<ConfirmationHeightAnchor>,
         spks: &mut impl Iterator<Item = (I, ScriptBuf)>,
         stop_gap: usize,
@@ -299,7 +299,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
     fn populate_with_outpoints(
         &self,
-        cps: &BTreeMap<u32, CheckPoint>,
+        cps: &BTreeMap<u32, CheckPoint<BlockId>>,
         graph_update: &mut TxGraph<ConfirmationHeightAnchor>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
@@ -352,7 +352,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Populate the `graph_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
-        cps: &BTreeMap<u32, CheckPoint>,
+        cps: &BTreeMap<u32, CheckPoint<BlockId>>,
         graph_update: &mut TxGraph<ConfirmationHeightAnchor>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
@@ -394,11 +394,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 ///
 /// This can be transformed into a [`FullScanResult`] with either [`ConfirmationHeightAnchor`] or
 /// [`ConfirmationTimeHeightAnchor`] anchor types.
-pub struct ElectrumFullScanResult<K>(FullScanResult<K, ConfirmationHeightAnchor>);
+pub struct ElectrumFullScanResult<K>(FullScanResult<K, BlockId, ConfirmationHeightAnchor>);
 
 impl<K> ElectrumFullScanResult<K> {
     /// Return [`FullScanResult`] with [`ConfirmationHeightAnchor`].
-    pub fn with_confirmation_height_anchor(self) -> FullScanResult<K, ConfirmationHeightAnchor> {
+    pub fn with_confirmation_height_anchor(
+        self,
+    ) -> FullScanResult<K, BlockId, ConfirmationHeightAnchor> {
         self.0
     }
 
@@ -408,7 +410,7 @@ impl<K> ElectrumFullScanResult<K> {
     pub fn with_confirmation_time_height_anchor(
         self,
         client: &BdkElectrumClient<impl ElectrumApi>,
-    ) -> Result<FullScanResult<K, ConfirmationTimeHeightAnchor>, Error> {
+    ) -> Result<FullScanResult<K, BlockId, ConfirmationTimeHeightAnchor>, Error> {
         let res = self.0;
         Ok(FullScanResult {
             graph_update: try_into_confirmation_time_result(res.graph_update, &client.inner)?,
@@ -422,11 +424,11 @@ impl<K> ElectrumFullScanResult<K> {
 ///
 /// This can be transformed into a [`SyncResult`] with either [`ConfirmationHeightAnchor`] or
 /// [`ConfirmationTimeHeightAnchor`] anchor types.
-pub struct ElectrumSyncResult(SyncResult<ConfirmationHeightAnchor>);
+pub struct ElectrumSyncResult(SyncResult<BlockId, ConfirmationHeightAnchor>);
 
 impl ElectrumSyncResult {
     /// Return [`SyncResult`] with [`ConfirmationHeightAnchor`].
-    pub fn with_confirmation_height_anchor(self) -> SyncResult<ConfirmationHeightAnchor> {
+    pub fn with_confirmation_height_anchor(self) -> SyncResult<BlockId, ConfirmationHeightAnchor> {
         self.0
     }
 
@@ -436,7 +438,7 @@ impl ElectrumSyncResult {
     pub fn with_confirmation_time_height_anchor(
         self,
         client: &BdkElectrumClient<impl ElectrumApi>,
-    ) -> Result<SyncResult<ConfirmationTimeHeightAnchor>, Error> {
+    ) -> Result<SyncResult<BlockId, ConfirmationTimeHeightAnchor>, Error> {
         let res = self.0;
         Ok(SyncResult {
             graph_update: try_into_confirmation_time_result(res.graph_update, &client.inner)?,
@@ -476,8 +478,8 @@ fn try_into_confirmation_time_result(
 /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`.
 fn construct_update_tip(
     client: &impl ElectrumApi,
-    prev_tip: CheckPoint,
-) -> Result<(CheckPoint, Option<u32>), Error> {
+    prev_tip: CheckPoint<BlockId>,
+) -> Result<(CheckPoint<BlockId>, Option<u32>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
     let new_tip_height = height as u32;
 
@@ -501,7 +503,7 @@ fn construct_update_tip(
 
     // Find the "point of agreement" (if any).
     let agreement_cp = {
-        let mut agreement_cp = Option::<CheckPoint>::None;
+        let mut agreement_cp = Option::<CheckPoint<BlockId>>::None;
         for cp in prev_tip.iter() {
             let cp_block = cp.block_id();
             let hash = match new_blocks.get(&cp_block.height) {
@@ -550,7 +552,7 @@ fn construct_update_tip(
 ///
 /// [tx status](https://electrumx-spesmilo.readthedocs.io/en/latest/protocol-basics.html#status)
 fn determine_tx_anchor(
-    cps: &BTreeMap<u32, CheckPoint>,
+    cps: &BTreeMap<u32, CheckPoint<BlockId>>,
     raw_height: i32,
     txid: Txid,
 ) -> Option<ConfirmationHeightAnchor> {

@@ -103,6 +103,12 @@ pub struct BlockId {
     pub hash: BlockHash,
 }
 
+impl AsRef<BlockId> for BlockId {
+    fn as_ref(&self) -> &BlockId {
+        self
+    }
+}
+
 impl Anchor for BlockId {
     fn anchor_block(&self) -> Self {
         *self
