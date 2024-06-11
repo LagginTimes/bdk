@@ -4,7 +4,7 @@ use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     keychain::Balance,
-    local_chain::{CheckPoint, LocalChain},
+    local_chain::{ChangeSet, CheckPoint, LocalChain},
     Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_testenv::{anyhow, TestEnv};
@@ -48,7 +48,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
 
         assert_eq!(
             local_chain.apply_update(emission.checkpoint,)?,
-            BTreeMap::from([(height, Some(hash))]),
+            ChangeSet::from_iter([(height, Some(BlockId { height, hash }))]),
             "chain update changeset is unexpected",
         );
     }
@@ -94,11 +94,11 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         assert_eq!(
             local_chain.apply_update(emission.checkpoint,)?,
             if exp_height == exp_hashes.len() - reorged_blocks.len() {
-                core::iter::once((height, Some(hash)))
+                core::iter::once((height, Some(BlockId { height, hash })))
                     .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
                     .collect::<bdk_chain::local_chain::ChangeSet>()
             } else {
-                BTreeMap::from([(height, Some(hash))])
+                ChangeSet::from_iter([(height, Some(BlockId { height, hash }))])
             },
             "chain update changeset is unexpected",
         );

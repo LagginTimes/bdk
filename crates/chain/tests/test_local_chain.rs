@@ -16,23 +16,26 @@ use proptest::prelude::*;
 mod common;
 
 #[derive(Debug)]
-struct TestLocalChain<'a> {
+struct TestLocalChain<'a, B: AsRef<BlockId>> {
     name: &'static str,
-    chain: LocalChain,
-    update: CheckPoint,
-    exp: ExpectedResult<'a>,
+    chain: LocalChain<B>,
+    update: CheckPoint<B>,
+    exp: ExpectedResult<'a, B>,
 }
 
 #[derive(Debug, PartialEq)]
-enum ExpectedResult<'a> {
+enum ExpectedResult<'a, B> {
     Ok {
-        changeset: &'a [(u32, Option<BlockHash>)],
-        init_changeset: &'a [(u32, Option<BlockHash>)],
+        changeset: &'a [(u32, Option<B>)],
+        init_changeset: &'a [(u32, Option<B>)],
     },
     Err(CannotConnectError),
 }
 
-impl<'a> TestLocalChain<'a> {
+impl<'a, B: AsRef<BlockId>> TestLocalChain<'a, B>
+where
+    B: Copy + std::fmt::Debug + PartialEq,
+{
     fn run(mut self) {
         println!("[TestLocalChain] test: {}", self.name);
         let got_changeset = match self.chain.apply_update(self.update) {
@@ -55,13 +58,13 @@ impl<'a> TestLocalChain<'a> {
             } => {
                 assert_eq!(
                     got_changeset,
-                    changeset.iter().cloned().collect(),
+                    ChangeSet::from_iter(changeset.iter().cloned().collect::<Vec<_>>()),
                     "{}: unexpected changeset",
                     self.name
                 );
                 assert_eq!(
                     self.chain.initial_changeset(),
-                    init_changeset.iter().cloned().collect(),
+                    ChangeSet::from_iter(init_changeset.iter().cloned().collect::<Vec<_>>()),
                     "{}: unexpected initial changeset",
                     self.name
                 );
@@ -83,7 +86,7 @@ fn update_local_chain() {
             update: chain_update![(0, h!("A"))],
             exp: ExpectedResult::Ok {
                 changeset: &[],
-                init_changeset: &[(0, Some(h!("A")))],
+                init_changeset: &[(0, Some(BlockId { height: 0, hash: h!("A")}))],
             },
         },
         TestLocalChain {
@@ -91,8 +94,8 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("A"))],
             update: chain_update![(0, h!("A")), (1, h!("B"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("A"))), (1, Some(h!("B")))],
+                changeset: &[(1, Some(BlockId{height: 1, hash: h!("B")}))],
+                init_changeset: &[(0, Some(BlockId { height: 0 , hash: h!("A")})), (1, Some(BlockId { height: 1, hash: h!("B")}))],
             },
         },
         TestLocalChain {
@@ -117,7 +120,7 @@ fn update_local_chain() {
             update: chain_update![(0, h!("A"))],
             exp: ExpectedResult::Ok {
                 changeset: &[],
-                init_changeset: &[(0, Some(h!("A")))],
+                init_changeset: &[(0, Some(BlockId { height: 0, hash: h!("A")}))],
             },
         },
         // Introduce an older checkpoint (B)
@@ -129,8 +132,12 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("_")), (2, h!("C")), (3, h!("D"))],
             update: chain_update![(0, h!("_")), (1, h!("B")), (2, h!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("_"))), (1, Some(h!("B"))), (2, Some(h!("C"))), (3, Some(h!("D")))],
+                changeset: &[(1, Some(BlockId{height: 1, hash: h!("B")}))],
+                init_changeset: &[
+                    (0, Some(BlockId{ height: 0, hash: h!("_")})),
+                    (1, Some(BlockId{ height: 1, hash: h!("B")})),
+                    (2, Some(BlockId{ height: 2, hash: h!("C")})),
+                    (3, Some(BlockId{ height: 3, hash: h!("D")}))],
             },
         },
         // Introduce an older checkpoint (A) that is not directly behind PoA
@@ -142,8 +149,12 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("_")), (3, h!("B")), (4, h!("C"))],
             update: chain_update![(0, h!("_")), (2, h!("A")), (4, h!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(2, Some(h!("A")))],
-                init_changeset: &[(0, Some(h!("_"))), (2, Some(h!("A"))), (3, Some(h!("B"))), (4, Some(h!("C")))],
+                changeset: &[(2, Some(BlockId{height: 2, hash: h!("A")}))],
+                init_changeset: &[
+                    (0, Some(BlockId{ height: 0, hash: h!("_")})),
+                    (2, Some(BlockId{ height: 2, hash: h!("A")})),
+                    (3, Some(BlockId{ height: 3, hash: h!("B")})),
+                    (4, Some(BlockId{ height: 4, hash: h!("C")}))],
             }
         },
         // Introduce an older checkpoint (B) that is not the oldest checkpoint
@@ -155,8 +166,12 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("_")), (1, h!("A")), (3, h!("C"))],
             update: chain_update![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(2, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("_"))), (1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
+                changeset: &[(2, Some(BlockId{height: 2, hash: h!("B")}))],
+                init_changeset: &[
+                    (0, Some(BlockId{ height: 0, hash: h!("_")})),
+                    (1, Some(BlockId{ height: 1, hash: h!("A")})),
+                    (2, Some(BlockId{ height: 2, hash: h!("B")})),
+                    (3, Some(BlockId{ height: 3, hash: h!("C")}))],
             }
         },
         // Introduce two older checkpoints below the PoA
@@ -168,8 +183,12 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("_")), (3, h!("C"))],
             update: chain_update![(0, h!("_")), (1, h!("A")), (2, h!("B")), (3, h!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("A"))), (2, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("_"))), (1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
+                changeset: &[(1, Some(BlockId{height: 1, hash: h!("A")})), (2, Some(BlockId{height: 2, hash: h!("B")}))],
+                init_changeset: &[
+                    (0, Some(BlockId{ height: 0 , hash: h!("_")})),
+                    (1, Some(BlockId{ height: 1, hash: h!("A")})),
+                    (2, Some(BlockId { height: 2, hash: h!("B")})),
+                    (3, Some(BlockId{ height: 3, hash: h!("C")}))],
             },
         },
         TestLocalChain {
@@ -177,8 +196,8 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("im-wrong")), (1, h!("we-agree"))],
             update: chain_update![(0, h!("fix")), (1, h!("we-agree"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(0, Some(h!("fix")))],
-                init_changeset: &[(0, Some(h!("fix"))), (1, Some(h!("we-agree")))],
+                changeset: &[(0, Some(BlockId{ height: 0, hash: h!("fix")}))],
+                init_changeset: &[(0, Some(BlockId { height: 0, hash: h!("fix")})), (1, Some(BlockId{ height: 1, hash: h!("we-agree")}))],
             },
         },
         // B and C are in both chain and update
@@ -191,13 +210,13 @@ fn update_local_chain() {
             chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
             update: chain_update![(0, h!("_")), (1, h!("A")), (2, h!("B")), (3, h!("C")), (4, h!("D"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("A"))), (4, Some(h!("D")))],
+                changeset: &[(1, Some(BlockId{height: 1, hash: h!("A")})), (4, Some(BlockId{height: 4, hash: h!("D")}))],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (1, Some(h!("A"))),
-                    (2, Some(h!("B"))),
-                    (3, Some(h!("C"))),
-                    (4, Some(h!("D"))),
+                    (0, Some(BlockId{height: 0, hash: h!("_")})),
+                    (1, Some(BlockId{height: 1, hash: h!("A")})),
+                    (2, Some(BlockId{height: 2, hash: h!("B")})),
+                    (3, Some(BlockId{height: 3, hash: h!("C")})),
+                    (4, Some(BlockId{height: 4, hash: h!("D")})),
                 ],
             },
         },
@@ -225,16 +244,16 @@ fn update_local_chain() {
             update: chain_update![(0, h!("_")), (2, h!("B'")), (3, h!("C'")), (4, h!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (2, Some(h!("B'"))),
-                    (3, Some(h!("C'"))),
-                    (4, Some(h!("D"))),
+                    (2, Some(BlockId{height: 2, hash: h!("B'")})),
+                    (3, Some(BlockId{height: 3, hash: h!("C'")})),
+                    (4, Some(BlockId{height: 4, hash: h!("D")})),
                     (5, None),
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (2, Some(h!("B'"))),
-                    (3, Some(h!("C'"))),
-                    (4, Some(h!("D"))),
+                    (0, Some(BlockId{height: 0, hash: h!("_")})),
+                    (2, Some(BlockId{height: 2, hash: h!("B'")})),
+                    (3, Some(BlockId{height: 3, hash: h!("C'")})),
+                    (4, Some(BlockId{height: 4, hash: h!("D")})),
                 ],
             },
         },
@@ -249,16 +268,16 @@ fn update_local_chain() {
             update: chain_update![(0, h!("_")), (1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (1, Some(h!("B'"))),
-                    (2, Some(h!("C'"))),
-                    (3, Some(h!("D"))),
+                    (1, Some(BlockId{height: 1, hash: h!("B'")})),
+                    (2, Some(BlockId{height: 2, hash: h!("C'")})),
+                    (3, Some(BlockId{height: 3, hash: h!("D")})),
                     (4, None)
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))), 
-                    (1, Some(h!("B'"))),
-                    (2, Some(h!("C'"))),
-                    (3, Some(h!("D"))),
+                    (0, Some(BlockId{height: 0, hash: h!("_")})),
+                    (1, Some(BlockId{height: 1, hash: h!("B'")})),
+                    (2, Some(BlockId{height: 2, hash: h!("C'")})),
+                    (3, Some(BlockId{height: 3, hash: h!("D")})),
                 ],
             },
         },
@@ -284,16 +303,16 @@ fn update_local_chain() {
             update: chain_update![(0, h!("A")), (2, h!("C")), (4, h!("E")), (5, h!("F"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (2, Some(h!("C"))),
-                    (5, Some(h!("F"))),
+                    (2, Some(BlockId{height: 2, hash: h!("C")})),
+                    (5, Some(BlockId{height: 5, hash: h!("F")})),
                 ],
                 init_changeset: &[
-                    (0, Some(h!("A"))),
-                    (1, Some(h!("B"))),
-                    (2, Some(h!("C"))),
-                    (3, Some(h!("D"))),
-                    (4, Some(h!("E"))),
-                    (5, Some(h!("F"))),
+                    (0, Some(BlockId{height: 0, hash: h!("A")})),
+                    (1, Some(BlockId{height: 1, hash: h!("B")})),
+                    (2, Some(BlockId{height: 2, hash: h!("C")})),
+                    (3, Some(BlockId{height: 3, hash: h!("D")})),
+                    (4, Some(BlockId{height: 4, hash: h!("E")})),
+                    (5, Some(BlockId{height: 5, hash: h!("F")})),
                 ],
             },
         },
@@ -307,14 +326,14 @@ fn update_local_chain() {
             update: chain_update![(0, h!("_")), (2, h!("C")), (3, h!("D'"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (3, Some(h!("D'"))),
+                    (3, Some(BlockId{height: 3, hash: h!("D'")})),
                     (4, None),
                     (5, None),
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (2, Some(h!("C"))),
-                    (3, Some(h!("D'"))),
+                    (0, Some(BlockId{height: 0, hash: h!("_")})),
+                    (2, Some(BlockId{height: 2, hash: h!("C")})),
+                    (3, Some(BlockId{height: 3, hash: h!("D'")})),
                 ],
             },
         },
@@ -325,36 +344,54 @@ fn update_local_chain() {
 
 #[test]
 fn local_chain_insert_block() {
-    struct TestCase {
-        original: LocalChain,
+    struct TestCase<B: AsRef<BlockId>> {
+        original: LocalChain<B>,
         insert: (u32, BlockHash),
-        expected_result: Result<ChangeSet, AlterCheckPointError>,
-        expected_final: LocalChain,
+        expected_result: Result<ChangeSet<B>, AlterCheckPointError>,
+        expected_final: LocalChain<B>,
     }
 
     let test_cases = [
         TestCase {
             original: local_chain![(0, h!("_"))],
             insert: (5, h!("block5")),
-            expected_result: Ok([(5, Some(h!("block5")))].into()),
+            expected_result: Ok(ChangeSet::from_iter([(
+                5,
+                Some(BlockId {
+                    height: 5,
+                    hash: h!("block5"),
+                }),
+            )])),
             expected_final: local_chain![(0, h!("_")), (5, h!("block5"))],
         },
         TestCase {
             original: local_chain![(0, h!("_")), (3, h!("A"))],
             insert: (4, h!("B")),
-            expected_result: Ok([(4, Some(h!("B")))].into()),
+            expected_result: Ok(ChangeSet::from_iter([(
+                4,
+                Some(BlockId {
+                    height: 4,
+                    hash: h!("B"),
+                }),
+            )])),
             expected_final: local_chain![(0, h!("_")), (3, h!("A")), (4, h!("B"))],
         },
         TestCase {
             original: local_chain![(0, h!("_")), (4, h!("B"))],
             insert: (3, h!("A")),
-            expected_result: Ok([(3, Some(h!("A")))].into()),
+            expected_result: Ok(ChangeSet::from_iter([(
+                3,
+                Some(BlockId {
+                    height: 3,
+                    hash: h!("A"),
+                }),
+            )])),
             expected_final: local_chain![(0, h!("_")), (3, h!("A")), (4, h!("B"))],
         },
         TestCase {
             original: local_chain![(0, h!("_")), (2, h!("K"))],
             insert: (2, h!("K")),
-            expected_result: Ok([].into()),
+            expected_result: Ok(ChangeSet::default()),
             expected_final: local_chain![(0, h!("_")), (2, h!("K"))],
         },
         TestCase {
@@ -383,12 +420,12 @@ fn local_chain_insert_block() {
 
 #[test]
 fn local_chain_disconnect_from() {
-    struct TestCase {
+    struct TestCase<B: AsRef<BlockId>> {
         name: &'static str,
-        original: LocalChain,
+        original: LocalChain<B>,
         disconnect_from: (u32, BlockHash),
-        exp_result: Result<ChangeSet, MissingGenesisError>,
-        exp_final: LocalChain,
+        exp_result: Result<ChangeSet<B>, MissingGenesisError>,
+        exp_final: LocalChain<B>,
     }
 
     let test_cases = [
@@ -535,8 +572,8 @@ fn checkpoint_from_block_ids() {
 
 #[test]
 fn checkpoint_query() {
-    struct TestCase {
-        chain: LocalChain,
+    struct TestCase<B: AsRef<BlockId>> {
+        chain: LocalChain<B>,
         /// The heights we want to call [`CheckPoint::query`] with, represented as an inclusive
         /// range.
         ///
@@ -663,13 +700,13 @@ fn local_chain_apply_header_connected_to() {
         }
     }
 
-    struct TestCase {
+    struct TestCase<B: AsRef<BlockId>> {
         name: &'static str,
-        chain: LocalChain,
+        chain: LocalChain<B>,
         header: Header,
         height: u32,
         connected_to: BlockId,
-        exp_result: Result<Vec<(u32, Option<BlockHash>)>, ApplyHeaderError>,
+        exp_result: Result<Vec<(u32, Option<BlockId>)>, ApplyHeaderError>,
     }
 
     let test_cases = [
@@ -703,7 +740,7 @@ fn local_chain_apply_header_connected_to() {
                 header,
                 height,
                 connected_to,
-                exp_result: Ok(vec![(height, Some(hash))]),
+                exp_result: Ok(vec![(height, Some(BlockId { height, hash }))]),
             }
         },
         {
@@ -735,7 +772,16 @@ fn local_chain_apply_header_connected_to() {
                     height: 3,
                     hash: h!("C"),
                 },
-                exp_result: Ok(vec![(prev_height, Some(prev_hash)), (height, Some(hash))]),
+                exp_result: Ok(vec![
+                    (
+                        prev_height,
+                        Some(BlockId {
+                            height: prev_height,
+                            hash: prev_hash,
+                        }),
+                    ),
+                    (height, Some(BlockId { height, hash })),
+                ]),
             }
         },
         {
@@ -818,7 +864,10 @@ fn generate_height_range_bounds(
     )
 }
 
-fn generate_checkpoints(max_height: u32, max_count: usize) -> impl Strategy<Value = CheckPoint> {
+fn generate_checkpoints(
+    max_height: u32,
+    max_count: usize,
+) -> impl Strategy<Value = CheckPoint<BlockId>> {
     proptest::collection::btree_set(1..max_height, 0..max_count).prop_map(|mut heights| {
         heights.insert(0); // must have genesis
         CheckPoint::from_block_ids(heights.into_iter().map(|height| {

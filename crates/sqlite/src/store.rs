@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::Error;
 use bdk_chain::{
-    indexed_tx_graph, keychain, local_chain, tx_graph, Anchor, Append, DescriptorExt, DescriptorId,
+    indexed_tx_graph, keychain, local_chain, tx_graph, Anchor, Append, BlockId, DescriptorExt,
+    DescriptorId,
 };
 use bdk_persist::CombinedChangeSet;
 
@@ -141,14 +142,14 @@ impl<K, A> Store<K, A> {
         db_transaction: &rusqlite::Transaction,
         chain_changeset: &local_chain::ChangeSet,
     ) -> Result<(), Error> {
-        for (height, hash) in chain_changeset.iter() {
-            match hash {
+        for (height, block) in chain_changeset.iter() {
+            match block {
                 // add new hash at height
-                Some(hash) => {
+                Some(block) => {
                     let insert_block_stmt = &mut db_transaction
                         .prepare_cached("INSERT INTO block (hash, height) VALUES (:hash, :height)")
                         .expect("insert block statement");
-                    let hash = hash.to_string();
+                    let hash = block.hash.to_string();
                     insert_block_stmt
                         .execute(named_params! {":hash": hash, ":height": height })
                         .map_err(Error::Sqlite)?;
@@ -171,7 +172,7 @@ impl<K, A> Store<K, A> {
     /// Select all blocks.
     fn select_blocks(
         db_transaction: &rusqlite::Transaction,
-    ) -> Result<BTreeMap<u32, Option<BlockHash>>, Error> {
+    ) -> Result<BTreeMap<u32, Option<BlockId>>, Error> {
         let mut select_blocks_stmt = db_transaction
             .prepare_cached("SELECT height, hash FROM block")
             .expect("select blocks statement");
@@ -180,7 +181,10 @@ impl<K, A> Store<K, A> {
             .query_map([], |row| {
                 let height = row.get_unwrap::<usize, u32>(0);
                 let hash = row.get_unwrap::<usize, String>(1);
-                let hash = Some(BlockHash::from_str(hash.as_str()).expect("block hash"));
+                let hash = Some(BlockId {
+                    height,
+                    hash: BlockHash::from_str(hash.as_str()).expect("block hash"),
+                });
                 Ok((height, hash))
             })
             .map_err(Error::Sqlite)?;
@@ -515,7 +519,7 @@ where
         let db_transaction = self.db_transaction()?;
 
         let network = Self::select_network(&db_transaction)?;
-        let chain = Self::select_blocks(&db_transaction)?;
+        let chain = local_chain::ChangeSet::from_iter(Self::select_blocks(&db_transaction)?);
         let keychains_added = Self::select_keychains(&db_transaction)?;
         let last_revealed = Self::select_last_revealed(&db_transaction)?;
         let txs = Self::select_txs(&db_transaction)?;
@@ -658,12 +662,29 @@ mod test {
             BlockHash::from_str("000000006c02c8ea6e4ff69651f7fcde348fb9d557a06e6957b65552002a7820")
                 .unwrap();
 
-        let block_changeset = [
-            (0, Some(block_hash_0)),
-            (1, Some(block_hash_1)),
-            (2, Some(block_hash_2)),
-        ]
-        .into();
+        let block_changeset = local_chain::ChangeSet::from_iter([
+            (
+                0,
+                Some(BlockId {
+                    height: 0,
+                    hash: block_hash_0,
+                }),
+            ),
+            (
+                1,
+                Some(BlockId {
+                    height: 1,
+                    hash: block_hash_1,
+                }),
+            ),
+            (
+                2,
+                Some(BlockId {
+                    height: 2,
+                    hash: block_hash_2,
+                }),
+            ),
+        ]);
 
         let ext_keychain = Keychain::External {
             account: 0,
