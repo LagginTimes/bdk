@@ -1,5 +1,6 @@
 //! Helper types for spk-based blockchain clients.
 
+use crate::BlockId;
 use crate::{
     collections::BTreeMap, local_chain::CheckPoint, ConfirmationTimeHeightAnchor, TxGraph,
 };
@@ -11,12 +12,15 @@ use core::{fmt::Debug, marker::PhantomData, ops::RangeBounds};
 ///
 /// A client sync fetches relevant chain data for a known list of scripts, transaction ids and
 /// outpoints. The sync process also updates the chain from the given [`CheckPoint`].
-pub struct SyncRequest {
+pub struct SyncRequest<B: AsRef<BlockId> = BlockId>
+where
+    B: Clone,
+{
     /// A checkpoint for the current chain [`LocalChain::tip`].
     /// The sync process will return a new chain update that extends this tip.
     ///
     /// [`LocalChain::tip`]: crate::local_chain::LocalChain::tip
-    pub chain_tip: CheckPoint,
+    pub chain_tip: CheckPoint<B>,
     /// Transactions that spend from or to these indexed script pubkeys.
     pub spks: Box<dyn ExactSizeIterator<Item = ScriptBuf> + Send>,
     /// Transactions with these txids.
@@ -25,9 +29,12 @@ pub struct SyncRequest {
     pub outpoints: Box<dyn ExactSizeIterator<Item = OutPoint> + Send>,
 }
 
-impl SyncRequest {
+impl<B: AsRef<BlockId>> SyncRequest<B>
+where
+    B: Clone,
+{
     /// Construct a new [`SyncRequest`] from a given `cp` tip.
-    pub fn from_chain_tip(cp: CheckPoint) -> Self {
+    pub fn from_chain_tip(cp: CheckPoint<B>) -> Self {
         Self {
             chain_tip: cp,
             spks: Box::new(core::iter::empty()),
@@ -175,11 +182,14 @@ impl SyncRequest {
 /// Data returned from a spk-based blockchain client sync.
 ///
 /// See also [`SyncRequest`].
-pub struct SyncResult<A = ConfirmationTimeHeightAnchor> {
+pub struct SyncResult<B: AsRef<BlockId> = BlockId, A = ConfirmationTimeHeightAnchor>
+where
+    B: Clone,
+{
     /// The update to apply to the receiving [`TxGraph`].
     pub graph_update: TxGraph<A>,
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
-    pub chain_update: CheckPoint,
+    pub chain_update: CheckPoint<B>,
 }
 
 /// Data required to perform a spk-based blockchain client full scan.
@@ -188,20 +198,26 @@ pub struct SyncResult<A = ConfirmationTimeHeightAnchor> {
 /// data until some stop gap number of scripts is found that have no data. This operation is
 /// generally only used when importing or restoring previously used keychains in which the list of
 /// used scripts is not known. The full scan process also updates the chain from the given [`CheckPoint`].
-pub struct FullScanRequest<K> {
+pub struct FullScanRequest<K, B: AsRef<BlockId> = BlockId>
+where
+    B: Clone,
+{
     /// A checkpoint for the current [`LocalChain::tip`].
     /// The full scan process will return a new chain update that extends this tip.
     ///
     /// [`LocalChain::tip`]: crate::local_chain::LocalChain::tip
-    pub chain_tip: CheckPoint,
+    pub chain_tip: CheckPoint<B>,
     /// Iterators of script pubkeys indexed by the keychain index.
     pub spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = (u32, ScriptBuf)> + Send>>,
 }
 
-impl<K: Ord + Clone> FullScanRequest<K> {
+impl<K: Ord + Clone, B: AsRef<BlockId>> FullScanRequest<K, B>
+where
+    B: Clone,
+{
     /// Construct a new [`FullScanRequest`] from a given `chain_tip`.
     #[must_use]
-    pub fn from_chain_tip(chain_tip: CheckPoint) -> Self {
+    pub fn from_chain_tip(chain_tip: CheckPoint<B>) -> Self {
         Self {
             chain_tip,
             spks_by_keychain: BTreeMap::new(),
@@ -218,7 +234,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
     #[cfg(feature = "miniscript")]
     #[must_use]
     pub fn from_keychain_txout_index(
-        chain_tip: CheckPoint,
+        chain_tip: CheckPoint<B>,
         index: &crate::keychain::KeychainTxOutIndex<K>,
     ) -> Self
     where
@@ -316,11 +332,14 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 /// Data returned from a spk-based blockchain client full scan.
 ///
 /// See also [`FullScanRequest`].
-pub struct FullScanResult<K, A = ConfirmationTimeHeightAnchor> {
+pub struct FullScanResult<K, B: AsRef<BlockId> = BlockId, A = ConfirmationTimeHeightAnchor>
+where
+    B: Clone,
+{
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
     pub graph_update: TxGraph<A>,
     /// The update to apply to the receiving [`TxGraph`].
-    pub chain_update: CheckPoint,
+    pub chain_update: CheckPoint<B>,
     /// Last active indices for the corresponding keychains (`K`).
     pub last_active_indices: BTreeMap<K, u32>,
 }
