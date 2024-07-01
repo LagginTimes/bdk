@@ -3,14 +3,14 @@ use bdk_chain::{
     keychain::Balance,
     local_chain::LocalChain,
     spk_client::SyncRequest,
-    ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
+    ConfirmationBlockTime, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
     recv_chain: &LocalChain,
-    recv_graph: &IndexedTxGraph<ConfirmationTimeHeightAnchor, SpkTxOutIndex<()>>,
+    recv_graph: &IndexedTxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
@@ -45,7 +45,7 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationTimeHeightAnchor, _>::new({
+    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -135,7 +135,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationTimeHeightAnchor, _>::new({
+    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index

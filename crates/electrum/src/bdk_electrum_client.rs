@@ -4,7 +4,7 @@ use bdk_chain::{
     local_chain::CheckPoint,
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::TxGraph,
-    Anchor, BlockId, ConfirmationTimeHeightAnchor,
+    Anchor, BlockId, ConfirmationBlockTime,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::{
@@ -123,7 +123,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<FullScanResult<K>, Error> {
         let (tip, latest_blocks) =
             fetch_tip_and_latest_blocks(&self.inner, request.chain_tip.clone())?;
-        let mut graph_update = TxGraph::<ConfirmationTimeHeightAnchor>::default();
+        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
 
         for (keychain, keychain_spks) in request.spks_by_keychain {
@@ -203,7 +203,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
     fn populate_with_spks<I: Ord + Clone>(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         mut spks: impl Iterator<Item = (I, ScriptBuf)>,
         stop_gap: usize,
         batch_size: usize,
@@ -251,7 +251,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
     fn populate_with_outpoints(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
         for outpoint in outpoints {
@@ -299,7 +299,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Populate the `graph_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
         for txid in txids {
@@ -335,7 +335,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // An anchor is inserted if the transaction is validated to be in a confirmed block.
     fn validate_merkle_for_anchor(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         txid: Txid,
         confirmation_height: i32,
     ) -> Result<(), Error> {
@@ -364,10 +364,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             if is_confirmed_tx {
                 let _ = graph_update.insert_anchor(
                     txid,
-                    ConfirmationTimeHeightAnchor {
-                        confirmation_height: merkle_res.block_height as u32,
+                    ConfirmationBlockTime {
                         confirmation_time: header.time as u64,
-                        anchor_block: BlockId {
+                        block_id: BlockId {
                             height: merkle_res.block_height as u32,
                             hash: header.block_hash(),
                         },
@@ -382,7 +381,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // which we do not have by default. This data is needed to calculate the transaction fee.
     fn fetch_prev_txout(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
     ) -> Result<(), Error> {
         let full_txs: Vec<Arc<Transaction>> =
             graph_update.full_txs().map(|tx_node| tx_node.tx).collect();
