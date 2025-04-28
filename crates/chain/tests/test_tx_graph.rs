@@ -287,7 +287,7 @@ fn insert_tx_displaces_txouts() {
 }
 
 #[test]
-fn insert_signed_tx_displaces_unsigned() {
+fn insert_tx_witness_precedence() {
     let previous_output = OutPoint::new(hash!("prev"), 2);
     let unsigned_tx = Transaction {
         version: transaction::Version::ONE,
@@ -351,6 +351,78 @@ fn insert_signed_tx_displaces_unsigned() {
             }
         );
         assert!(changeset_insert_unsigned.is_empty());
+    }
+
+    // Smaller witness displaces larger witness.
+    {
+        let small_wit = Witness::from_slice(&[vec![0u8; 10]]);
+        let large_wit = Witness::from_slice(&[vec![0u8; 20]]);
+        let tx_small = Transaction {
+            input: vec![TxIn {
+                previous_output,
+                script_sig: ScriptBuf::default(),
+                sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: small_wit.clone(),
+            }],
+            ..unsigned_tx.clone()
+        };
+        let tx_large = Transaction {
+            input: vec![TxIn {
+                previous_output,
+                script_sig: ScriptBuf::default(),
+                sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: large_wit.clone(),
+            }],
+            ..unsigned_tx.clone()
+        };
+
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_small = tx_graph.insert_tx(tx_small.clone());
+        let changeset_large = tx_graph.insert_tx(tx_large);
+        assert_eq!(
+            changeset_small,
+            ChangeSet {
+                txs: [Arc::new(tx_small.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert!(changeset_large.is_empty());
+    }
+
+    // Lexicographically smaller tx displaces lexicographically larger tx.
+    {
+        let lex_a = Witness::from_slice(&[vec![0x01]]);
+        let lex_b = Witness::from_slice(&[vec![0x02]]);
+        let tx_a = Transaction {
+            input: vec![TxIn {
+                previous_output,
+                script_sig: ScriptBuf::default(),
+                sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: lex_a.clone(),
+            }],
+            ..unsigned_tx.clone()
+        };
+        let tx_b = Transaction {
+            input: vec![TxIn {
+                previous_output,
+                script_sig: ScriptBuf::default(),
+                sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: lex_b.clone(),
+            }],
+            ..unsigned_tx.clone()
+        };
+
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_a = tx_graph.insert_tx(tx_a.clone());
+        let changeset_b = tx_graph.insert_tx(tx_b);
+        assert_eq!(
+            changeset_a,
+            ChangeSet {
+                txs: [Arc::new(tx_a.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert!(changeset_b.is_empty());
     }
 }
 
