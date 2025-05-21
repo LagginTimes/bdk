@@ -202,7 +202,15 @@ impl TestEnv {
         // are current. In contrast, getting a notification for a new block tip ensures that the
         // confirmed spk histories are current, including the new notified tip. This is a result of
         // the internal workings of Electrs.
-        self.electrum_client().block_headers_subscribe()?;
+        let notification = self.electrsd.client.block_headers_subscribe()?;
+
+        // Fetch header directly if notification is past `block_height`.
+        if notification.height > block_height {
+            let header = self.electrum_client().block_header(block_height)?;
+            if block_hash.map_or(true, |h| header.block_hash() == h) {
+                return Ok(());
+            }
+        }
 
         let delay = Duration::from_millis(200);
         let start = std::time::Instant::now();
@@ -381,6 +389,48 @@ mod test {
                 false => assert_ne!(block, reorged_block),
             }
         }
+
+        Ok(())
+    }
+
+    /// Checks that [`TestEnv::wait_until_electrum_sees_block`] can see a block at a non-tip height
+    /// with the correct hash.
+    #[test]
+    fn test_wait_until_electrum_sees_non_tip() -> Result<()> {
+        let env = TestEnv::new()?;
+        let rpc = env.rpc_client();
+
+        // Mine some blocks.
+        let _ = env.mine_blocks(101, None)?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
+
+        // Check we can see a block at non-tip height.
+        let target_height = 90;
+        let correct_hash = rpc.get_block_hash(target_height as u64)?;
+        env.wait_until_electrum_sees_block(
+            target_height,
+            Some(correct_hash),
+            Duration::from_secs(6),
+        )?;
+
+        Ok(())
+    }
+
+    /// Checks that [`TestEnv::wait_until_electrum_sees_block`] fails when hash is mismatched.
+    #[test]
+    fn test_wait_until_electrum_sees_mismatched_hash() -> Result<()> {
+        let env = TestEnv::new()?;
+        let rpc = env.rpc_client();
+
+        // Mine some blocks.
+        let _ = env.mine_blocks(101, None)?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
+
+        // Use a wrong hash (take the tip's hash but ask for height 0).
+        let tip_hash = rpc.get_block_hash(env.rpc_client().get_block_count()?)?;
+        let result = env.wait_until_electrum_sees_block(90, Some(tip_hash), Duration::from_secs(6));
+
+        assert!(result.is_err(), "Expected error for mismatched hash");
 
         Ok(())
     }
