@@ -56,7 +56,15 @@ where
 
 pub fn test_sync_performance(c: &mut Criterion) {
     let env = TestEnv::new().unwrap();
-    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+
+    // Test local server:
+    // let electrum_client =
+    // electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+
+    // Test remote server:
+    let electrum_client =
+        electrum_client::Client::new("ssl://electrum.blockstream.info:50002").unwrap();
+
     let client = BdkElectrumClient::new(electrum_client);
 
     const NUM_BLOCKS: usize = 200;
