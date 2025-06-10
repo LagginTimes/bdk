@@ -178,9 +178,11 @@ fn main() -> anyhow::Result<()> {
                     })
             };
 
+            let now = std::time::Instant::now();
             let res = client
                 .full_scan::<_>(request, stop_gap, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
+            println!("\nFULL_SCAN TIME: {:?}", now.elapsed());
             (
                 res.chain_update,
                 res.tx_update,
@@ -255,9 +257,11 @@ fn main() -> anyhow::Result<()> {
                 );
             }
 
+            let now = std::time::Instant::now();
             let res = client
                 .sync(request, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
+            println!("SYNC TIME: {:?}", now.elapsed());
 
             // drop lock on graph and chain
             drop((graph, chain));
