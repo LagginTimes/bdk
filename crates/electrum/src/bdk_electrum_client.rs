@@ -1,3 +1,5 @@
+use bdk_core::bitcoin::consensus::deserialize;
+use bdk_core::bitcoin::hashes::hex::FromHex;
 use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, Transaction, Txid},
     collections::{BTreeMap, HashMap, HashSet},
@@ -6,6 +8,7 @@ use bdk_core::{
     },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
+use electrum_client::Param;
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::sync::{Arc, Mutex};
 
@@ -205,6 +208,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             batch_size,
             &mut pending_anchors,
         )?;
+        println!(
+            "TXIDS TO SCAN: {:?}",
+            request.iter_txids().into_iter().collect::<Vec<_>>()
+        );
         self.populate_with_txids(
             start_time,
             &mut tx_update,
@@ -398,50 +405,69 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         txids: impl IntoIterator<Item = Txid>,
         pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<(), Error> {
-        let mut txs = Vec::new();
-        let mut scripts = Vec::new();
+        let tip_height = self.inner.block_headers_subscribe()?.height as u32;
+        let mut fallback_txids = Vec::new();
+
         for txid in txids {
-            match self.fetch_tx(txid) {
-                Ok(tx) => {
-                    let spk = tx
-                        .output
-                        .first()
-                        .map(|txo| &txo.script_pubkey)
-                        .expect("tx must have an output")
-                        .clone();
-                    txs.push(tx);
-                    scripts.push(spk);
+            match self.inner.raw_call(
+                "blockchain.transaction.get",
+                vec![Param::String(txid.to_string()), Param::Bool(true)],
+            ) {
+                Ok(raw) => {
+                    // Handle confirmation height.
+                    let confirmations = raw
+                        .get("confirmations")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    if confirmations > 0 {
+                        let height = tip_height + 1 - (confirmations as u32);
+                        pending_anchors.push((txid, height as usize));
+                    } else {
+                        tx_update.seen_ats.insert((txid, start_time));
+                    }
+
+                    // Decode the hex‐encoded tx and push it.
+                    let hex_str = raw.get("hex").and_then(|v| v.as_str()).ok_or_else(|| {
+                        Error::Protocol("verbose response missing hex field".into())
+                    })?;
+                    let raw_bytes = Vec::<u8>::from_hex(hex_str)
+                        .map_err(|e| Error::Protocol(format!("hex decode error: {}", e).into()))?;
+                    let tx: Transaction = deserialize(&raw_bytes)
+                        .map_err(|e| Error::Protocol(format!("tx parse error: {}", e).into()))?;
+                    tx_update.txs.push(Arc::new(tx));
                 }
+                // Fallback if `transaction.get` verbose flag is not supported.
                 Err(electrum_client::Error::Protocol(_)) => {
-                    continue;
+                    fallback_txids.push(txid);
                 }
                 Err(e) => return Err(e),
             }
         }
 
-        // because of restrictions of the Electrum API, we have to use the `script_get_history`
-        // call to get confirmation status of our transaction
-        let spk_histories = self
-            .inner
-            .batch_script_get_history(scripts.iter().map(|spk| spk.as_script()))?;
+        if !fallback_txids.is_empty() {
+            let scripts = fallback_txids
+                .iter()
+                .filter_map(|&txid| self.fetch_tx(txid).ok())
+                .map(|tx| tx.output.first().unwrap().script_pubkey.clone())
+                .collect::<Vec<_>>();
+            let spk_histories = self
+                .inner
+                .batch_script_get_history(scripts.iter().map(|s| s.as_script()))?;
 
-        for (tx, spk_history) in txs.into_iter().zip(spk_histories) {
-            if let Some(res) = spk_history
-                .into_iter()
-                .find(|res| res.tx_hash == tx.compute_txid())
-            {
-                match res.height.try_into() {
-                    // Returned heights 0 & -1 are reserved for unconfirmed txs.
-                    Ok(height) if height > 0 => {
-                        pending_anchors.push((tx.compute_txid(), height));
-                    }
-                    _ => {
-                        tx_update.seen_ats.insert((res.tx_hash, start_time));
+            for (txid, spk_history) in fallback_txids.into_iter().zip(spk_histories) {
+                if let Some(res) = spk_history.into_iter().find(|res| res.tx_hash == txid) {
+                    match res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            pending_anchors.push((txid, height));
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((res.tx_hash, start_time));
+                        }
                     }
                 }
+                tx_update.txs.push(self.fetch_tx(txid)?);
             }
-
-            tx_update.txs.push(tx);
         }
 
         Ok(())
