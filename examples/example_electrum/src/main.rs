@@ -17,6 +17,8 @@ use example_cli::{
     clap::{self, Parser, Subcommand},
     ChangeSet, Keychain,
 };
+#[cfg(feature = "log")]
+use tracing_subscriber::EnvFilter;
 
 const DB_MAGIC: &[u8] = b"bdk_example_electrum";
 const DB_PATH: &str = ".bdk_example_electrum.db";
@@ -95,6 +97,13 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "log")]
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new("trace")),
+        )
+        .init();
+
     let example_cli::Init {
         args,
         graph,

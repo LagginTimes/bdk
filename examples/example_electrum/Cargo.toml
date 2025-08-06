@@ -8,4 +8,9 @@ edition = "2021"
 [dependencies]
 bdk_chain = { path = "../../crates/chain", features = ["serde"] }
 bdk_electrum = { path = "../../crates/electrum" }
+bdk_common = { path = "../../crates/common" }
 example_cli = { path = "../example_cli" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[features]
+log = ["bdk_common/log"]
